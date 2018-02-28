@@ -1,100 +1,149 @@
 ---
-title: "PA1_template.rmd"
-author: "vince"
-date: "February 28, 2018"
-output: html_document
-keep_md: true
+title: "Reproducible Research: Peer Assessment 1"
+output: 
+  html_document:
+    keep_md: true
 ---
 
-```{r setup, include=FALSE}
+```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(plyr); library(dplyr); library(ggplot2); library(xtable); library(lubridate)
 ```
 
-```{r, echo=TRUE}
+This assignment makes use of data from a personal activity monitoring device. This device collects data at 5 minute intervals through out the day. The data consists of two months of data from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5 minute intervals each day.
 
-library(dplyr)
-library(lubridate)
-library(ggplot2)
+## Loading and preprocessing the data
+
+This code chunk will download and unzip the Activity Monitoring dataset. It will then load the data into an R object.
+```{r GetData}
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+if(!file.exists("activity.zip"))download.file(fileUrl, "activity.zip")
+if(!file.exists("activity.csv"))unzip("activity.zip")
+if(!exists("activity"))activity <- read.csv("activity.csv")
 ```
 
-
-
-```{r, echo=TRUE}
-activities <- read.csv("activity.csv")
-activities$date <- ymd(activities$date)
-
-activities_per_day <- group_by(activities, date)
-activities_per_interval <- group_by(activities, interval)
+The data is now contained in the object 'activity'. This is the structure of the data.
+```{r DataStructure}
+str(activity)
+unique(activity$interval)
 ```
 
+The data contains the total number of steps taken by an individual during the Months of October and November, 2012, and is broken down into 5 minute intervals. The intervals are broken down by hour. We The next code chunk will reformat the interval to four digits, the first two digits identify the hours (00 to 23) and the second two digits identify the minutes (00, 05, 10 ... 55) . It will then change the interval to a time format (HH:MM). The dates are currently coded as a factor list, so the code will reformat this as a date. 
 
-Histogram of the total number of steps taken each day:
+```{r, preprocessing_of_data}
+activity2 <- activity
 
-```{r, echo=TRUE}
-items <- tapply(activities$steps, activities$date, FUN=sum)
-barplot(items, las=2, cex.names = 0.5)
+activity2 <- mutate(activity2, interval2 = "")
+activity2$interval2 <- mapply(function(x,y) paste0(rep(x,y), collapse = ""),0,4 - nchar(activity2$interval))
+activity2$interval2 <- paste0(activity2$interval2, activity2$interval)
+activity2$interval2 <- format(strptime(activity2$interval2, format = "%H%M"), format = "%H:%M")
+
+activity2$date <- as.Date(activity2$date)
 ```
 
-Mean and median number of steps taken each day. Time series plot of the average number of steps taken.
+## What is mean total number of steps taken per day?
 
-```{r, echo=TRUE}
-mean_and_median <- summarise(activities_per_day, mean=mean(steps, na.rm = TRUE), n=median(steps, na.rm = TRUE))
-plot(mean_and_median$mean, type="l", col="red", ylab = "Steps", xlab = "Day", las=2, main="Average number of steps taken")
-lines(mean_and_median$median, type="l", col="blue")
-legend("topright", legend=c("mean", "median"), pch=1, col=c("red", "blue"))
+This histogram shows the total number of steps per day for the two month period. 
+
+```{r, mean_steps_per_day}
+activity2 <- group_by(activity2, date)
+StepsPerDay <- summarise(activity2, total = sum(steps, na.rm = TRUE))
+g <- ggplot(StepsPerDay, aes(date, weight = total))
+g + geom_histogram(bins = 61, fill = "white", color = "black") + labs(y ="Total Steps", x ="Date", title = "Total Steps per Day from October 1, 2012 thru November 30, 2012")
+
 ```
+  
+This table gives the mean and median of the total steps per day across the two month period.
+```{r, show_mean_and_median_table, results="asis"}
 
-The 5-minute interval that, on average, contains the maximum number of steps
-```{r, echo=TRUE}
-average_of_steps_by_interval <- summarise(activities_per_interval, average=mean(steps, na.rm = TRUE))
-ranking_of_intervals <- arrange(average_of_steps_by_interval, desc(average))
-print(ranking_of_intervals$interval[1])
-```
+xt <- xtable(summarise(StepsPerDay, Average = mean(total), Median = median(total)), caption = "Step per Day")
+print(xt, type = "html")
 
-Code to describe and show a strategy for imputing missing data
-
-- Total number of missing values in the dataset
-```{r, echo=TRUE}
-nas <- is.na(activities$steps)
-total_empty <- sum(nas)
-percentage_empty <- mean(nas)
-# Total empty results
-print(total_empty)
-
-# Percentage
-print(paste(sprintf("%.2f", percentage_empty * 100), "%", sep=""))
-```
-
-- Using average of that 5-minute to populate NAs
-```{r, echo=TRUE}
-not_empty <- mutate(activities)
-na_intervals <- not_empty$interval[nas]
-average_na_intervals <- sapply(na_intervals, function(item) {average_of_steps_by_interval$average[average_of_steps_by_interval$interval==item]})
-not_empty$steps[nas] = average_na_intervals
-#average_of_steps_by_interval$average[average_of_steps_by_interval$interval==0]
 ```
 
 
-Histogram of the total number of steps taken each day after missing values are imputed
-```{r, echo=TRUE}
-not_empty_items <- tapply(not_empty$steps, not_empty$date, FUN=sum)
+## What is the average daily activity pattern?
 
-par(mfrow=c(2,1))
-barplot(items, las=2, cex.names = 0.5, main="Histogram with missing values (NAs)")
-barplot(not_empty_items, las=2, cex.names = 0.5, main="Histogram without missing values (NAs)")
+This plot shows the average(across the two month time period) steps per 5 minute interval.
+```{r average_daily_activity_pattern}
+
+StepsPerInterval <- summarise(group_by(activity2, interval2, interval), average = mean(steps, na.rm = TRUE))
+with(StepsPerInterval, interval2 <- as.factor(interval2))
+StepsPerInterval$interval2 <- as.POSIXct(StepsPerInterval$interval2, format="%H:%M")
+g <- ggplot(data =StepsPerInterval, aes(x=interval2, y=average))
+g + geom_line(group = 1) + scale_x_datetime(date_labels = "%H:%M") + labs(x = "Interval (HH:MM)", y = "Average Steps", title = "Variation in average steps through the day")
+
+for(i in 1:nrow(StepsPerInterval)){
+     if(StepsPerInterval$average[i] == max(StepsPerInterval$average)){
+     maxInterval <- StepsPerInterval$interval[i]
+}}
+```
+The interval with the max average number of steps is `r maxInterval`  
+
+
+## Imputing missing values
+
+```{r how_many_missing_values}
+## figure out where the na's occur Are the individual intervals, or complete days of missing values?
+missingData <- sum(is.na(activity2$steps))
+```
+Note that there `r missingData` intervals where there are missing values (coded as NA).
+```{r location_of_missing_values}
+sumImDa <- summarise(activity2, sumna = sum(is.na(steps)))
+uniqueSum <- unique(sumImDa$sumna)
+```
+Broken down by date, there 2 unique values for the number of missing intervals: `r uniqueSum`. Since there are 288 intervals per day, the missing values represent complete days and not individual or small groups of intervals.The presence of missing days may introduce bias into some calculations or summaries of the data. Therefore, we will replace the missing values with the average total number of steps for the interval.
+
+```{r days_of_the_week}
+activity3 <- group_by(activity2, interval)
+sumtab <- summarise(activity3, average = mean(steps, na.rm = TRUE))
+activity3 <- merge(activity3, sumtab, by = "interval")
+for(i in 1:nrow(activity3)){
+     if(is.na(activity3$steps[i])){
+              activity3$steps[i]<- activity3$average[i]
+          }
+}
+
+activity3 <- group_by(activity3, date)
+StepsPerDay2 <- summarise(activity3, total = sum(steps, na.rm = TRUE))
+f <- ggplot(StepsPerDay2, aes(date, weight = total))
+f + geom_histogram(bins = 61, fill = "white", color = "black") + labs(y ="Total Steps", x ="Date", title = "Total Steps per Day October 1, 2012 thru November 30, 2012 with replacement of NAs")
 ```
 
-As we can see, missing values can change the final result of an analysis.
+This table gives the mean and median of the total steps per day across the two month period.
 
-Panel plot comparing the average number of steps taken per 5-minute interval across weekdays and weekends
+```{r, show_mean_and_median_table_with_replacement, results="asis"}
 
-```{r, echo=TRUE}
-activities_with_days <- mutate(activities, weekday=weekdays(date))
-activities_by_day_interval <- group_by(activities_with_days, weekday, interval)
+xt <- xtable(summarise(StepsPerDay2, Average = mean(total), Median = median(total)), caption = "Step per Day")
+print(xt, type = "html")
 
-results_per_day <- summarise(activities_by_day_interval, steps=mean(steps, na.rm=TRUE))
-qplot(interval, steps, data=results_per_day, facets= weekday ~ .) + geom_line()
 ```
+By replacing the missing values with the average for the individual intervals, the mean and median are now the same.
+
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+Here we average across the weekdays and across the weekends to look for differences in activity patterns.
+```{r weekdays_weekends}
+activity3 <- mutate(activity3, DayOfTheWeek = weekdays(date))
+activity3 <- mutate(activity3, weekday_end = "")
+for(i in 1:nrow(activity3)){
+     if(activity3$DayOfTheWeek[i] == "Saturday" |activity3$DayOfTheWeek[i] == "Sunday"){
+     activity3$weekday_end[i] ='Weekend'
+}else {
+     activity3$weekday_end[i] ='Weekday'
+}
+}
+SummWeekDayEnd <- summarise(group_by(activity3, weekday_end, interval2, interval), average = mean(steps, na.rm = TRUE))
+with(SummWeekDayEnd, interval2 <- as.factor(interval2))
+SummWeekDayEnd$interval2 <- as.POSIXct(SummWeekDayEnd$interval2, format="%H:%M")
+h <- ggplot(data =SummWeekDayEnd, aes(x=interval2, y=average))
+h + geom_line(group = 1) + scale_x_datetime(date_labels = "%H:%M") + labs(x = "Interval (HH:MM)", y = "Average Steps", title = "Variation in average steps through out Weekdays and Weekend days") + facet_grid(SummWeekDayEnd$weekday_end~.)
+
+```
+
+
 
 
 
